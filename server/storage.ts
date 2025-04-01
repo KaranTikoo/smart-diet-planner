@@ -3,7 +3,9 @@ import {
   foods, type Food, type InsertFood,
   meals, type Meal, type InsertMeal,
   dailySummaries, type DailySummary, type InsertDailySummary,
-  mealPlans, type MealPlan, type InsertMealPlan
+  mealPlans, type MealPlan, type InsertMealPlan,
+  nutritionAnalytics, type NutritionAnalytics, type InsertNutritionAnalytics,
+  recommendations, type Recommendation, type InsertRecommendation
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, like, desc, asc } from "drizzle-orm";
@@ -42,6 +44,19 @@ export interface IStorage {
   createMealPlan(mealPlan: InsertMealPlan): Promise<MealPlan>;
   updateMealPlan(id: number, mealPlan: Partial<MealPlan>): Promise<MealPlan | undefined>;
   deleteMealPlan(id: number): Promise<boolean>;
+  
+  // Nutrition analytics operations
+  getNutritionAnalytics(userId: number, startDate: Date, endDate: Date): Promise<NutritionAnalytics | undefined>;
+  getNutritionAnalyticsHistory(userId: number, limit?: number): Promise<NutritionAnalytics[]>;
+  createNutritionAnalytics(analytics: InsertNutritionAnalytics): Promise<NutritionAnalytics>;
+  
+  // Recommendation operations
+  getRecommendations(userId: number, type?: string): Promise<Recommendation[]>;
+  getRecommendation(id: number): Promise<Recommendation | undefined>;
+  createRecommendation(recommendation: InsertRecommendation): Promise<Recommendation>;
+  updateRecommendation(id: number, recommendation: Partial<Recommendation>): Promise<Recommendation | undefined>;
+  deleteRecommendation(id: number): Promise<boolean>;
+  getActiveRecommendations(userId: number): Promise<Recommendation[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -219,6 +234,93 @@ export class DatabaseStorage implements IStorage {
   async deleteMealPlan(id: number): Promise<boolean> {
     await db.delete(mealPlans).where(eq(mealPlans.id, id));
     return true;
+  }
+  
+  // Nutrition analytics operations
+  async getNutritionAnalytics(userId: number, startDate: Date, endDate: Date): Promise<NutritionAnalytics | undefined> {
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+    const [analytics] = await db.select()
+      .from(nutritionAnalytics)
+      .where(
+        and(
+          eq(nutritionAnalytics.userId, userId),
+          eq(nutritionAnalytics.periodStart, startDateStr),
+          eq(nutritionAnalytics.periodEnd, endDateStr)
+        )
+      );
+    return analytics || undefined;
+  }
+
+  async getNutritionAnalyticsHistory(userId: number, limit: number = 10): Promise<NutritionAnalytics[]> {
+    return db.select()
+      .from(nutritionAnalytics)
+      .where(eq(nutritionAnalytics.userId, userId))
+      .orderBy(desc(nutritionAnalytics.createdAt))
+      .limit(limit);
+  }
+
+  async createNutritionAnalytics(insertAnalytics: InsertNutritionAnalytics): Promise<NutritionAnalytics> {
+    const [analytics] = await db
+      .insert(nutritionAnalytics)
+      .values(insertAnalytics)
+      .returning();
+    return analytics;
+  }
+
+  // Recommendation operations
+  async getRecommendations(userId: number, type?: string): Promise<Recommendation[]> {
+    const query = db.select().from(recommendations);
+    
+    if (type) {
+      return query
+        .where(and(
+          eq(recommendations.userId, userId),
+          eq(recommendations.type, type)
+        ))
+        .orderBy(desc(recommendations.priority), desc(recommendations.createdAt));
+    } else {
+      return query
+        .where(eq(recommendations.userId, userId))
+        .orderBy(desc(recommendations.priority), desc(recommendations.createdAt));
+    }
+  }
+
+  async getRecommendation(id: number): Promise<Recommendation | undefined> {
+    const [recommendation] = await db.select().from(recommendations).where(eq(recommendations.id, id));
+    return recommendation || undefined;
+  }
+
+  async createRecommendation(insertRecommendation: InsertRecommendation): Promise<Recommendation> {
+    const [recommendation] = await db
+      .insert(recommendations)
+      .values(insertRecommendation)
+      .returning();
+    return recommendation;
+  }
+
+  async updateRecommendation(id: number, recommendationData: Partial<Recommendation>): Promise<Recommendation | undefined> {
+    const [updatedRecommendation] = await db
+      .update(recommendations)
+      .set(recommendationData)
+      .where(eq(recommendations.id, id))
+      .returning();
+    return updatedRecommendation || undefined;
+  }
+
+  async deleteRecommendation(id: number): Promise<boolean> {
+    await db.delete(recommendations).where(eq(recommendations.id, id));
+    return true;
+  }
+
+  async getActiveRecommendations(userId: number): Promise<Recommendation[]> {
+    const query = db.select().from(recommendations);
+    return query
+      .where(and(
+        eq(recommendations.userId, userId),
+        eq(recommendations.isActive, true)
+      ))
+      .orderBy(desc(recommendations.priority), desc(recommendations.createdAt));
   }
 }
 

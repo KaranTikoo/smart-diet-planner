@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, date, boolean, json } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, date, boolean, json, decimal } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -95,6 +95,50 @@ export const insertMealPlanSchema = createInsertSchema(mealPlans).omit({
   id: true
 });
 
+// Nutrition analytics model
+export const nutritionAnalytics = pgTable("nutrition_analytics", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  periodStart: date("period_start").notNull(),
+  periodEnd: date("period_end").notNull(),
+  avgCalories: decimal("avg_calories", { precision: 6, scale: 2 }).notNull(),
+  avgProtein: decimal("avg_protein", { precision: 6, scale: 2 }).notNull(),
+  avgCarbs: decimal("avg_carbs", { precision: 6, scale: 2 }).notNull(),
+  avgFat: decimal("avg_fat", { precision: 6, scale: 2 }).notNull(),
+  caloriesTrend: decimal("calories_trend", { precision: 5, scale: 2 }).default('0'),
+  proteinTrend: decimal("protein_trend", { precision: 5, scale: 2 }).default('0'),
+  carbsTrend: decimal("carbs_trend", { precision: 5, scale: 2 }).default('0'),
+  fatTrend: decimal("fat_trend", { precision: 5, scale: 2 }).default('0'),
+  targetAdherence: decimal("target_adherence", { precision: 5, scale: 2 }).default('0'),
+  mostConsumedFoods: json("most_consumed_foods").default('[]'),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertNutritionAnalyticsSchema = createInsertSchema(nutritionAnalytics).omit({
+  id: true,
+  createdAt: true
+});
+
+// Recommendations model
+export const recommendations = pgTable("recommendations", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  type: text("type").notNull(), // 'food', 'meal', 'nutrient', 'habit'
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  reason: text("reason").notNull(),
+  priority: integer("priority").default(1), // 1 (low) to 5 (high)
+  suggestedFoods: json("suggested_foods").default('[]'),
+  suggestedMeals: json("suggested_meals").default('[]'),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertRecommendationSchema = createInsertSchema(recommendations).omit({
+  id: true,
+  createdAt: true
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -110,3 +154,9 @@ export type InsertDailySummary = z.infer<typeof insertDailySummarySchema>;
 
 export type MealPlan = typeof mealPlans.$inferSelect;
 export type InsertMealPlan = z.infer<typeof insertMealPlanSchema>;
+
+export type NutritionAnalytics = typeof nutritionAnalytics.$inferSelect;
+export type InsertNutritionAnalytics = z.infer<typeof insertNutritionAnalyticsSchema>;
+
+export type Recommendation = typeof recommendations.$inferSelect;
+export type InsertRecommendation = z.infer<typeof insertRecommendationSchema>;

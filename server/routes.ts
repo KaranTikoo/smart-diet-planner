@@ -6,7 +6,9 @@ import {
   insertFoodSchema, 
   insertMealSchema, 
   insertDailySummarySchema,
-  insertMealPlanSchema
+  insertMealPlanSchema,
+  insertNutritionAnalyticsSchema,
+  insertRecommendationSchema
 } from "@shared/schema";
 import { ZodError } from "zod";
 
@@ -155,16 +157,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (summary) {
         summary = await storage.updateDailySummary(summary.id, {
-          totalCalories: summary.totalCalories + meal.calories,
-          totalProtein: summary.totalProtein + meal.protein,
-          totalCarbs: summary.totalCarbs + meal.carbs,
-          totalFat: summary.totalFat + meal.fat,
-          completedMeals: summary.completedMeals + 1
+          totalCalories: (summary.totalCalories || 0) + meal.calories,
+          totalProtein: (summary.totalProtein || 0) + meal.protein,
+          totalCarbs: (summary.totalCarbs || 0) + meal.carbs,
+          totalFat: (summary.totalFat || 0) + meal.fat,
+          completedMeals: (summary.completedMeals || 0) + 1
         });
       } else {
         summary = await storage.createDailySummary({
           userId: req.body.userId,
-          date: date,
+          date: date.toISOString().split('T')[0],
           totalCalories: meal.calories,
           totalProtein: meal.protein,
           totalCarbs: meal.carbs,
@@ -211,11 +213,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         if (summary) {
           await storage.updateDailySummary(summary.id, {
-            totalCalories: summary.totalCalories - meal.calories,
-            totalProtein: summary.totalProtein - meal.protein,
-            totalCarbs: summary.totalCarbs - meal.carbs,
-            totalFat: summary.totalFat - meal.fat,
-            completedMeals: summary.completedMeals - 1
+            totalCalories: (summary.totalCalories || 0) - meal.calories,
+            totalProtein: (summary.totalProtein || 0) - meal.protein,
+            totalCarbs: (summary.totalCarbs || 0) - meal.carbs,
+            totalFat: (summary.totalFat || 0) - meal.fat,
+            completedMeals: (summary.completedMeals || 0) - 1
           });
         }
         
@@ -386,6 +388,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       res.status(500).json({ message: "Failed to delete meal plan" });
+    }
+  });
+
+  // ===== Nutrition Analytics Routes =====
+  app.get('/api/nutrition-analytics', async (req, res) => {
+    try {
+      const userId = parseInt(req.query.userId as string);
+      const startDateStr = req.query.startDate as string;
+      const endDateStr = req.query.endDate as string;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+      
+      if (!userId) {
+        return res.status(400).json({ message: "userId is required" });
+      }
+      
+      // Return analytics history if no date range is specified
+      if (!startDateStr || !endDateStr) {
+        const history = await storage.getNutritionAnalyticsHistory(userId, limit);
+        return res.json(history);
+      }
+      
+      // Get analytics for specific date range
+      const startDate = new Date(startDateStr);
+      const endDate = new Date(endDateStr);
+      const analytics = await storage.getNutritionAnalytics(userId, startDate, endDate);
+      
+      if (!analytics) {
+        return res.json({
+          userId,
+          periodStart: startDateStr,
+          periodEnd: endDateStr,
+          avgCalories: 0,
+          avgProtein: 0,
+          avgCarbs: 0,
+          avgFat: 0,
+          caloriesTrend: 0,
+          proteinTrend: 0,
+          carbsTrend: 0,
+          fatTrend: 0,
+          targetAdherence: 0,
+          mostConsumedFoods: []
+        });
+      }
+      
+      res.json(analytics);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch nutrition analytics" });
+    }
+  });
+
+  app.post('/api/nutrition-analytics', validateRequest(insertNutritionAnalyticsSchema), async (req, res) => {
+    try {
+      const analytics = await storage.createNutritionAnalytics(req.body);
+      res.status(201).json(analytics);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create nutrition analytics" });
+    }
+  });
+
+  // ===== Recommendation Routes =====
+  app.get('/api/recommendations', async (req, res) => {
+    try {
+      const userId = parseInt(req.query.userId as string);
+      const type = req.query.type as string;
+      const activeOnly = req.query.active === 'true';
+      
+      if (!userId) {
+        return res.status(400).json({ message: "userId is required" });
+      }
+      
+      let recommendations;
+      if (activeOnly) {
+        recommendations = await storage.getActiveRecommendations(userId);
+      } else {
+        recommendations = await storage.getRecommendations(userId, type);
+      }
+      
+      res.json(recommendations);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch recommendations" });
+    }
+  });
+
+  app.get('/api/recommendations/:id', async (req, res) => {
+    try {
+      const recommendation = await storage.getRecommendation(parseInt(req.params.id));
+      
+      if (!recommendation) {
+        return res.status(404).json({ message: "Recommendation not found" });
+      }
+      
+      res.json(recommendation);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch recommendation" });
+    }
+  });
+
+  app.post('/api/recommendations', validateRequest(insertRecommendationSchema), async (req, res) => {
+    try {
+      const recommendation = await storage.createRecommendation(req.body);
+      res.status(201).json(recommendation);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create recommendation" });
+    }
+  });
+
+  app.patch('/api/recommendations/:id', async (req, res) => {
+    try {
+      const recommendationId = parseInt(req.params.id);
+      const updatedRecommendation = await storage.updateRecommendation(recommendationId, req.body);
+      
+      if (!updatedRecommendation) {
+        return res.status(404).json({ message: "Recommendation not found" });
+      }
+      
+      res.json(updatedRecommendation);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update recommendation" });
+    }
+  });
+
+  app.delete('/api/recommendations/:id', async (req, res) => {
+    try {
+      const recommendationId = parseInt(req.params.id);
+      const success = await storage.deleteRecommendation(recommendationId);
+      
+      if (success) {
+        res.status(200).json({ success: true });
+      } else {
+        res.status(404).json({ message: "Recommendation not found" });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete recommendation" });
     }
   });
 
