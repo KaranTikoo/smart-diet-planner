@@ -158,5 +158,25 @@ export type InsertMealPlan = z.infer<typeof insertMealPlanSchema>;
 export type NutritionAnalytics = typeof nutritionAnalytics.$inferSelect;
 export type InsertNutritionAnalytics = z.infer<typeof insertNutritionAnalyticsSchema>;
 
+// Grocery list model
+export const groceryLists = pgTable("grocery_lists", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  name: text("name").notNull(),
+  mealPlanId: integer("meal_plan_id"),
+  dateCreated: date("date_created").defaultNow().notNull(),
+  items: json("items").notNull(), // Array of grocery items with quantities and status
+  notes: text("notes"),
+  isCompleted: boolean("is_completed").default(false),
+});
+
+export const insertGroceryListSchema = createInsertSchema(groceryLists).omit({
+  id: true,
+  dateCreated: true
+});
+
 export type Recommendation = typeof recommendations.$inferSelect;
 export type InsertRecommendation = z.infer<typeof insertRecommendationSchema>;
+
+export type GroceryList = typeof groceryLists.$inferSelect;
+export type InsertGroceryList = z.infer<typeof insertGroceryListSchema>;

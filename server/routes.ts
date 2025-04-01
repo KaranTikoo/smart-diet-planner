@@ -8,7 +8,8 @@ import {
   insertDailySummarySchema,
   insertMealPlanSchema,
   insertNutritionAnalyticsSchema,
-  insertRecommendationSchema
+  insertRecommendationSchema,
+  insertGroceryListSchema
 } from "@shared/schema";
 import { ZodError } from "zod";
 
@@ -521,6 +522,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
     } catch (error) {
       res.status(500).json({ message: "Failed to delete recommendation" });
+    }
+  });
+
+  // ===== Grocery List Routes =====
+  app.get('/api/grocery-lists', async (req, res) => {
+    try {
+      const userId = parseInt(req.query.userId as string);
+      
+      if (!userId) {
+        return res.status(400).json({ message: "userId is required" });
+      }
+      
+      const groceryLists = await storage.getGroceryListsByUser(userId);
+      res.json(groceryLists);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch grocery lists" });
+    }
+  });
+
+  app.get('/api/grocery-lists/:id', async (req, res) => {
+    try {
+      const groceryList = await storage.getGroceryList(parseInt(req.params.id));
+      
+      if (!groceryList) {
+        return res.status(404).json({ message: "Grocery list not found" });
+      }
+      
+      res.json(groceryList);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch grocery list" });
+    }
+  });
+
+  app.get('/api/meal-plans/:id/grocery-list', async (req, res) => {
+    try {
+      const mealPlanId = parseInt(req.params.id);
+      
+      // Check if grocery list already exists for this meal plan
+      const existingList = await storage.getGroceryListByMealPlan(mealPlanId);
+      if (existingList) {
+        return res.json(existingList);
+      }
+      
+      return res.status(404).json({ message: "No grocery list found for this meal plan" });
+    } catch (error) {
+      res.status(500).json({ message: "Failed to fetch grocery list for meal plan" });
+    }
+  });
+
+  app.post('/api/grocery-lists', validateRequest(insertGroceryListSchema), async (req, res) => {
+    try {
+      const groceryList = await storage.createGroceryList(req.body);
+      res.status(201).json(groceryList);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to create grocery list" });
+    }
+  });
+
+  app.post('/api/meal-plans/:id/generate-grocery-list', async (req, res) => {
+    try {
+      const mealPlanId = parseInt(req.params.id);
+      const userId = parseInt(req.body.userId as string);
+      
+      if (!userId) {
+        return res.status(400).json({ message: "userId is required" });
+      }
+      
+      // Check if grocery list already exists for this meal plan
+      const existingList = await storage.getGroceryListByMealPlan(mealPlanId);
+      if (existingList) {
+        return res.status(409).json({ 
+          message: "Grocery list already exists for this meal plan",
+          groceryList: existingList
+        });
+      }
+      
+      // Generate new grocery list from meal plan
+      const groceryList = await storage.generateGroceryListFromMealPlan(mealPlanId, userId);
+      res.status(201).json(groceryList);
+    } catch (error) {
+      if (error instanceof Error) {
+        res.status(400).json({ message: error.message });
+      } else {
+        res.status(500).json({ message: "Failed to generate grocery list" });
+      }
+    }
+  });
+
+  app.patch('/api/grocery-lists/:id', async (req, res) => {
+    try {
+      const groceryListId = parseInt(req.params.id);
+      const updatedGroceryList = await storage.updateGroceryList(groceryListId, req.body);
+      
+      if (!updatedGroceryList) {
+        return res.status(404).json({ message: "Grocery list not found" });
+      }
+      
+      res.json(updatedGroceryList);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to update grocery list" });
+    }
+  });
+
+  app.delete('/api/grocery-lists/:id', async (req, res) => {
+    try {
+      const groceryListId = parseInt(req.params.id);
+      const success = await storage.deleteGroceryList(groceryListId);
+      
+      if (success) {
+        res.status(200).json({ success: true });
+      } else {
+        res.status(404).json({ message: "Grocery list not found" });
+      }
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete grocery list" });
     }
   });
 

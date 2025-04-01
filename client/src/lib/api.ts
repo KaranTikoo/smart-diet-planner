@@ -153,3 +153,39 @@ export const updateRecommendation = async (id: number, recommendationData: any) 
 export const deleteRecommendation = async (id: number) => {
   return apiRequest('DELETE', `/api/recommendations/${id}`);
 };
+
+// Grocery List API
+export const fetchGroceryLists = async (userId: number) => {
+  const res = await fetch(`/api/grocery-lists?userId=${userId}`);
+  if (!res.ok) throw new Error('Failed to fetch grocery lists');
+  return res.json();
+};
+
+export const fetchGroceryList = async (id: number) => {
+  const res = await fetch(`/api/grocery-lists/${id}`);
+  if (!res.ok) throw new Error('Failed to fetch grocery list');
+  return res.json();
+};
+
+export const fetchGroceryListByMealPlan = async (mealPlanId: number) => {
+  const res = await fetch(`/api/meal-plans/${mealPlanId}/grocery-list`);
+  if (res.status === 404) return null; // No grocery list for this meal plan
+  if (!res.ok) throw new Error('Failed to fetch grocery list for meal plan');
+  return res.json();
+};
+
+export const createGroceryList = async (groceryListData: any) => {
+  return apiRequest('POST', '/api/grocery-lists', groceryListData);
+};
+
+export const generateGroceryListFromMealPlan = async (mealPlanId: number, userId: number) => {
+  return apiRequest('POST', `/api/meal-plans/${mealPlanId}/generate-grocery-list`, { userId });
+};
+
+export const updateGroceryList = async (id: number, groceryListData: any) => {
+  return apiRequest('PATCH', `/api/grocery-lists/${id}`, groceryListData);
+};
+
+export const deleteGroceryList = async (id: number) => {
+  return apiRequest('DELETE', `/api/grocery-lists/${id}`);
+};

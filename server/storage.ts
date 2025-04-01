@@ -5,7 +5,8 @@ import {
   dailySummaries, type DailySummary, type InsertDailySummary,
   mealPlans, type MealPlan, type InsertMealPlan,
   nutritionAnalytics, type NutritionAnalytics, type InsertNutritionAnalytics,
-  recommendations, type Recommendation, type InsertRecommendation
+  recommendations, type Recommendation, type InsertRecommendation,
+  groceryLists, type GroceryList, type InsertGroceryList
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, like, desc, asc } from "drizzle-orm";
@@ -57,6 +58,15 @@ export interface IStorage {
   updateRecommendation(id: number, recommendation: Partial<Recommendation>): Promise<Recommendation | undefined>;
   deleteRecommendation(id: number): Promise<boolean>;
   getActiveRecommendations(userId: number): Promise<Recommendation[]>;
+  
+  // Grocery list operations
+  getGroceryList(id: number): Promise<GroceryList | undefined>;
+  getGroceryListsByUser(userId: number): Promise<GroceryList[]>;
+  getGroceryListByMealPlan(mealPlanId: number): Promise<GroceryList | undefined>;
+  createGroceryList(groceryList: InsertGroceryList): Promise<GroceryList>;
+  updateGroceryList(id: number, groceryList: Partial<GroceryList>): Promise<GroceryList | undefined>;
+  deleteGroceryList(id: number): Promise<boolean>;
+  generateGroceryListFromMealPlan(mealPlanId: number, userId: number): Promise<GroceryList>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -321,6 +331,184 @@ export class DatabaseStorage implements IStorage {
         eq(recommendations.isActive, true)
       ))
       .orderBy(desc(recommendations.priority), desc(recommendations.createdAt));
+  }
+
+  // Grocery list operations
+  async getGroceryList(id: number): Promise<GroceryList | undefined> {
+    const [groceryList] = await db.select().from(groceryLists).where(eq(groceryLists.id, id));
+    return groceryList || undefined;
+  }
+
+  async getGroceryListsByUser(userId: number): Promise<GroceryList[]> {
+    return db.select()
+      .from(groceryLists)
+      .where(eq(groceryLists.userId, userId))
+      .orderBy(desc(groceryLists.dateCreated));
+  }
+
+  async getGroceryListByMealPlan(mealPlanId: number): Promise<GroceryList | undefined> {
+    const [groceryList] = await db.select()
+      .from(groceryLists)
+      .where(eq(groceryLists.mealPlanId, mealPlanId));
+    return groceryList || undefined;
+  }
+
+  async createGroceryList(insertGroceryList: InsertGroceryList): Promise<GroceryList> {
+    const [groceryList] = await db
+      .insert(groceryLists)
+      .values(insertGroceryList)
+      .returning();
+    return groceryList;
+  }
+
+  async updateGroceryList(id: number, groceryListData: Partial<GroceryList>): Promise<GroceryList | undefined> {
+    const [updatedGroceryList] = await db
+      .update(groceryLists)
+      .set(groceryListData)
+      .where(eq(groceryLists.id, id))
+      .returning();
+    return updatedGroceryList || undefined;
+  }
+
+  async deleteGroceryList(id: number): Promise<boolean> {
+    await db.delete(groceryLists).where(eq(groceryLists.id, id));
+    return true;
+  }
+
+  async generateGroceryListFromMealPlan(mealPlanId: number, userId: number): Promise<GroceryList> {
+    // First, get the meal plan
+    const mealPlan = await this.getMealPlan(mealPlanId);
+    if (!mealPlan) {
+      throw new Error(`Meal plan with ID ${mealPlanId} not found`);
+    }
+
+    if (mealPlan.userId !== userId) {
+      throw new Error('Unauthorized access to meal plan');
+    }
+
+    // Extract all meal IDs from the meal plan
+    const mealIds: number[] = [];
+    let parsedMealData: any;
+    
+    // Parse meal data if it's a string
+    try {
+      parsedMealData = typeof mealPlan.meals === 'string' 
+        ? JSON.parse(mealPlan.meals) 
+        : mealPlan.meals;
+    } catch (err) {
+      throw new Error(`Failed to parse meal plan data: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    
+    // Process meal data based on its structure
+    if (Array.isArray(parsedMealData)) {
+      // Handle array structure (flat list of meals or days with meals)
+      parsedMealData.forEach((item: any) => {
+        if (item.id) {
+          // Direct meal objects in array
+          mealIds.push(item.id);
+        } else if (item.meals && Array.isArray(item.meals)) {
+          // Day objects with meal arrays
+          item.meals.forEach((meal: any) => {
+            if (meal.id) {
+              mealIds.push(meal.id);
+            }
+          });
+        }
+      });
+    } else if (typeof parsedMealData === 'object' && parsedMealData !== null) {
+      // Handle object structure (organized by days or meal types)
+      for (const key in parsedMealData) {
+        const value = parsedMealData[key];
+        
+        if (Array.isArray(value)) {
+          // Direct arrays of meals under a key
+          value.forEach((meal: any) => {
+            if (meal.id) {
+              mealIds.push(meal.id);
+            }
+          });
+        } else if (typeof value === 'object' && value !== null) {
+          // Nested structure (e.g., days containing meal types)
+          for (const nestedKey in value) {
+            const nestedValue = value[nestedKey];
+            
+            if (Array.isArray(nestedValue)) {
+              nestedValue.forEach((meal: any) => {
+                if (meal.id) {
+                  mealIds.push(meal.id);
+                }
+              });
+            }
+          }
+        }
+      }
+    } else {
+      throw new Error(`Unsupported meal plan data structure`);
+    }
+
+    // Get all the meals
+    const mealPromises = mealIds.map(id => this.getMeal(id));
+    const meals = await Promise.all(mealPromises);
+    const validMeals = meals.filter(meal => meal !== undefined) as Meal[];
+
+    // Create grocery items from the meals
+    type GroceryItem = {
+      id: number;
+      name: string;
+      quantity: number;
+      unit: string;
+      category: string;
+      isChecked: boolean;
+    };
+
+    const groceryItemsMap = new Map<string, GroceryItem>();
+    
+    validMeals.forEach(meal => {
+      try {
+        const foodItems = typeof meal.foods === 'string' 
+          ? JSON.parse(meal.foods) 
+          : meal.foods;
+        
+        if (Array.isArray(foodItems)) {
+          foodItems.forEach((item: any) => {
+            const key = `${item.name}-${item.unit}`;
+            if (groceryItemsMap.has(key)) {
+              // Update quantity if item already exists
+              const existingItem = groceryItemsMap.get(key)!;
+              existingItem.quantity += item.quantity;
+            } else {
+              // Add new item
+              const newItem = {
+                id: groceryItemsMap.size + 1,
+                name: item.name,
+                quantity: item.quantity,
+                unit: item.unit,
+                category: item.category || 'uncategorized',
+                isChecked: false
+              };
+              groceryItemsMap.set(key, newItem);
+            }
+          });
+        } else {
+          throw new Error('Food items is not an array');
+        }
+      } catch (err) {
+        throw new Error(`Error processing meal foods for meal ${meal.id}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
+    // Create a new grocery list
+    const groceryListItems = Array.from(groceryItemsMap.values());
+    
+    const newGroceryList: InsertGroceryList = {
+      userId,
+      name: `Grocery List for ${mealPlan.name}`,
+      mealPlanId,
+      items: JSON.stringify(groceryListItems),
+      isCompleted: false
+    };
+
+    return this.createGroceryList(newGroceryList);
   }
 }
 
